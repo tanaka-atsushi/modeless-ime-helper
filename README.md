@@ -22,7 +22,7 @@ Windows 11 のタスクトレイ常駐アプリ。IME が ON のとき、**未�
 build.bat            -> build\ime2nd.exe  (CMake + Ninja + MSVC。VS 同梱の cmake を自動で使用)
 build\ime2nd.exe     -> 常駐開始（トレイアイコンの右クリックで 有効/無効・開始キー・自動起動・終了）
 build\ime2nd.exe --selftest   -> IME状態・変換モード・フック遅延と、20 秒間のフォーカス移動・欄の判定（normal / PASSWORD / unknown）を build\selftest.txt に出力
-pwsh -File tools\make-tray-icons.ps1   -> トレイアイコン res\tray-black.ico・res\tray-white.ico を作り直す（-Preview 画像.png で拡大プレビュー）
+pwsh -File tools\make-icons.ps1   -> アイコン res\app.ico（exe とトレイ共通）を作り直す（-Preview 画像.png で拡大プレビュー）
 ```
 
 開始キーを押している間も、Backspace・Esc・Enter・矢印などはそのまま IME / アプリに届きます（Backspace で未確定の1文字削除など、IME の普段の動作になります）。開始キー+Space は、未確定の中に半角スペースとして入ります。
@@ -33,7 +33,7 @@ pwsh -File tools\make-tray-icons.ps1   -> トレイアイコン res\tray-black.i
 - `ImeSwitcher` — 作業スレッド。開始キーを押したら `VK_IME_OFF`、離したら `VK_IME_ON` を注入する
 - `ImeState` — `ImmGetDefaultIMEWnd` + `WM_IME_CONTROL(IMC_GETOPENSTATUS / IMC_GETCONVERSIONMODE)`、ワーカースレッドでキャッシュ
 - `PasswordFocus` — フォーカスが移るたび（`EVENT_OBJECT_FOCUS` と前面ウィンドウの切り替え）に、ワーカースレッドで UI Automation の `IsPassword` を調べてキャッシュ
-- トレイアイコン — キーの形に Shift の矢印と「a」。明るいタスクバーでは黒、暗いタスクバーでは白（`SystemUsesLightTheme` を見て、テーマが変わると切り替え）
+- アイコン — 青いタイルに、白でキーの形・Shift の矢印・「a」。exe とトレイで同じ絵を使い、明るい・暗いどちらのタスクバー／エクスプローラーでも見える
 
 ## 設定
 

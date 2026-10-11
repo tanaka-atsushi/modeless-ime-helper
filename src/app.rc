@@ -1,5 +1,4 @@
 #include "resource.h"
 
 // Found through the res\ include directory (CMakeLists.txt).
-IDI_TRAY_BLACK ICON "tray-black.ico"
-IDI_TRAY_WHITE ICON "tray-white.ico"
+IDI_APP ICON "app.ico"

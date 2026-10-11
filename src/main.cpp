@@ -101,21 +101,12 @@ void SetTrayTip() {
     swprintf_s(g_nid.szTip, L"ime2nd - %s+英字 未確定に英字を混ぜる", TriggerName());
 }
 
-// The taskbar follows the system theme ("SystemUsesLightTheme"), not the apps' one. Missing = dark.
-bool TaskbarIsLight() {
-    DWORD v = 0, size = sizeof(v);
-    return RegGetValueW(HKEY_CURRENT_USER,
-                        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                        L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
-           v != 0;
-}
-
-// Loads the icon for the current taskbar theme at the small-icon size for the system DPI into
-// g_nid.hIcon. Returns the previous icon for the caller to destroy once the shell has the new one.
+// Loads the app icon at the small-icon size for the system DPI into g_nid.hIcon (its blue tile shows
+// on light and dark taskbars alike). Returns the previous icon for the caller to destroy once the
+// shell has the new one.
 HICON SetTrayIconImage() {
-    const int id = TaskbarIsLight() ? IDI_TRAY_BLACK : IDI_TRAY_WHITE;
     const int cx = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
-    auto icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(id),
+    auto icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP),
                                               IMAGE_ICON, cx, cx, LR_DEFAULTCOLOR));
     if (!icon) return nullptr;  // keep the current one
     HICON old = g_icon;
@@ -136,14 +127,6 @@ void AddTrayIcon() {
     SetTrayTip();
     Shell_NotifyIconW(NIM_ADD, &g_nid);
     if (old) DestroyIcon(old);
-}
-
-// Light/dark switch in Settings: swap the black and white icon.
-void OnThemeChanged() {
-    HICON old = SetTrayIconImage();
-    if (!old) return;
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-    DestroyIcon(old);
 }
 
 void SetTrigger(int vk) {
@@ -244,10 +227,6 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_TIMER:
             if (w == kTimerReinstall) KeyboardHook::Reinstall();
             return 0;
-        case WM_SETTINGCHANGE:  // reaches us because the main window is top-level, not HWND_MESSAGE
-            if (l && lstrcmpiW(reinterpret_cast<const wchar_t*>(l), L"ImmersiveColorSet") == 0)
-                OnThemeChanged();
-            break;
         case WM_DESTROY:
             Shell_NotifyIconW(NIM_DELETE, &g_nid);
             if (g_icon) DestroyIcon(g_icon);

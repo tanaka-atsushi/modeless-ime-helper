@@ -1,33 +1,26 @@
-# Generates the tray icons res\tray-black.ico (for a light taskbar) and res\tray-white.ico (for a
-# dark taskbar): a key cap with a Shift arrow and an "a" ("hold a key, type letters").
-# Drawn as geometry, not text, so no font is involved. Each .ico holds 16..64 px frames as 32-bit
-# BGRA DIBs; small sizes snap the key-cap outline to whole pixels.
-# Usage (from the repo root): pwsh -File tools\make-tray-icons.ps1 [-Preview out.png]
+# Generates res\app.ico, the one icon of the app (exe icon and tray icon): a key cap with a Shift
+# arrow and an "a" ("hold a key, type letters"), white on a blue tile, so it shows on light and dark
+# taskbars and Explorer backgrounds alike. Drawn as geometry, not text, so no font is involved.
+# Frames are 32-bit BGRA DIBs (256 px: PNG), 16-28 px covering the tray at 100-175% scaling; the
+# key-cap outline snaps to whole pixels at every size.
+# Usage (from the repo root): pwsh -File tools\make-icons.ps1 [-Preview out.png]
 param([string]$Preview)
 
 Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$sizes = 16, 20, 24, 28, 32, 40, 48, 64
+$appSizes = 16, 20, 24, 28, 32, 40, 48, 64, 128, 256
+$tile = [System.Drawing.Color]::FromArgb(255, 43, 89, 195)  # #2B59C3
 
-# Key-cap outline per size: stroke width and margin in whole pixels.
-$capStroke = @{ 16 = 1; 20 = 1; 24 = 2; 28 = 2; 32 = 2; 40 = 3; 48 = 3; 64 = 4 }
-$capMargin = @{ 16 = 0; 20 = 1; 24 = 1; 28 = 1; 32 = 1; 40 = 2; 48 = 2; 64 = 3 }
-
-function New-Frame([int]$s, [System.Drawing.Color]$color) {
-    $bmp = [System.Drawing.Bitmap]::new($s, $s, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $g.Clear([System.Drawing.Color]::Transparent)
+# Draws the key-cap glyph at the graphics origin, `s` px square.
+function Add-KeyCap([System.Drawing.Graphics]$g, [int]$s, [System.Drawing.Color]$color) {
     $brush = [System.Drawing.SolidBrush]::new($color)
-
-    # Key cap: rounded rectangle, outline centered on half pixels when the stroke is odd.
-    $w = $capStroke[$s]; $m = $capMargin[$s]
+    # Key cap: rounded rectangle; whole-pixel stroke and margin, centered on half pixels when odd.
+    $w = [Math]::Max(1, [Math]::Round($s * 0.065))
+    $m = [Math]::Floor($s / 20)
     $x0 = $m + $w / 2.0; $side = $s - 2 * $m - $w
-    $r = [Math]::Max(2.0, [Math]::Round($s * 0.19))
+    $d = 2 * [Math]::Max(2.0, [Math]::Round($s * 0.19))
     $cap = [System.Drawing.Drawing2D.GraphicsPath]::new()
-    $d = 2 * $r
     $cap.AddArc($x0, $x0, $d, $d, 180, 90)
     $cap.AddArc($x0 + $side - $d, $x0, $d, $d, 270, 90)
     $cap.AddArc($x0 + $side - $d, $x0 + $side - $d, $d, $d, 0, 90)
@@ -50,10 +43,35 @@ function New-Frame([int]$s, [System.Drawing.Color]$color) {
     $penA = [System.Drawing.Pen]::new($color, [single]$t)
     $cx = 19.5 * $k; $cy = 21.25 * $k; $rb = 3.75 * $k
     $g.DrawEllipse($penA, [single]($cx - $rb), [single]($cy - $rb), [single](2 * $rb), [single](2 * $rb))
-    $stemX = $cx + $rb
-    $g.FillRectangle($brush, [single]($stemX - $t / 2), [single](16.9 * $k), [single]$t, [single](25.6 * $k - 16.9 * $k))
+    $g.FillRectangle($brush, [single]($cx + $rb - $t / 2), [single](16.9 * $k), [single]$t, [single](8.7 * $k))
 
-    $g.Dispose(); $pen.Dispose(); $penA.Dispose(); $brush.Dispose(); $cap.Dispose()
+    $pen.Dispose(); $penA.Dispose(); $brush.Dispose(); $cap.Dispose()
+}
+
+function New-Canvas([int]$s) {
+    $bmp = [System.Drawing.Bitmap]::new($s, $s, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.Clear([System.Drawing.Color]::Transparent)
+    return @($bmp, $g)
+}
+
+# A rounded blue tile with the glyph, in white, centered at about 3/4 of the tile.
+function New-AppFrame([int]$s) {
+    $bmp, $g = New-Canvas $s
+    $r = [Math]::Max(3.0, [Math]::Round($s * 0.2)); $d = 2 * $r
+    $bg = [System.Drawing.Drawing2D.GraphicsPath]::new()
+    $bg.AddArc(0, 0, $d, $d, 180, 90); $bg.AddArc($s - $d, 0, $d, $d, 270, 90)
+    $bg.AddArc($s - $d, $s - $d, $d, $d, 0, 90); $bg.AddArc(0, $s - $d, $d, $d, 90, 90)
+    $bg.CloseFigure()
+    $fill = [System.Drawing.SolidBrush]::new($tile)
+    $g.FillPath($fill, $bg)
+    $gs = [int][Math]::Round($s * 0.74)
+    $off = [int][Math]::Floor(($s - $gs) / 2)
+    $g.TranslateTransform($off, $off)
+    Add-KeyCap $g $gs ([System.Drawing.Color]::White)
+    $g.Dispose(); $fill.Dispose(); $bg.Dispose()
     return $bmp
 }
 
@@ -85,9 +103,20 @@ function Get-DibBytes([System.Drawing.Bitmap]$bmp) {
     return , $ms.ToArray()  # the comma keeps the byte[] from being unrolled into the pipeline
 }
 
-function Write-Ico([string]$path, [System.Drawing.Color]$color) {
+function Get-PngBytes([System.Drawing.Bitmap]$bmp) {
+    $ms = [System.IO.MemoryStream]::new()
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    return , $ms.ToArray()
+}
+
+# Writes an .ico from `$sizes`, calling `$makeFrame` for each size. 256 px is stored as PNG.
+function Write-Ico([string]$path, [int[]]$sizes, [scriptblock]$makeFrame) {
     $images = [System.Collections.Generic.List[byte[]]]::new()
-    foreach ($s in $sizes) { $b = New-Frame $s $color; $images.Add((Get-DibBytes $b)); $b.Dispose() }
+    foreach ($s in $sizes) {
+        $b = & $makeFrame $s
+        $images.Add($(if ($s -ge 256) { Get-PngBytes $b } else { Get-DibBytes $b }))
+        $b.Dispose()
+    }
     $fs = [System.IO.File]::Create($path)
     $bw = [System.IO.BinaryWriter]::new($fs)
     $bw.Write([int16]0); $bw.Write([int16]1); $bw.Write([int16]$sizes.Count)
@@ -105,30 +134,33 @@ function Write-Ico([string]$path, [System.Drawing.Color]$color) {
 
 $res = Join-Path $root 'res'
 New-Item -ItemType Directory -Force $res | Out-Null
-Write-Ico (Join-Path $res 'tray-black.ico') ([System.Drawing.Color]::FromArgb(255, 26, 26, 26))
-Write-Ico (Join-Path $res 'tray-white.ico') ([System.Drawing.Color]::FromArgb(255, 255, 255, 255))
+Write-Ico (Join-Path $res 'app.ico') $appSizes { param($s) New-AppFrame $s }
 
-# Optional preview: every size at 1x and 8x on a light and a dark strip.
+# Optional preview: on a light and a dark strip, the tray sizes (16-64 px) at 1x and 8x, then 256 px.
 if ($Preview) {
     $scale = 8
-    $width = ($sizes | Measure-Object -Sum).Sum * ($scale + 1) + 40 * $sizes.Count
-    $sheet = [System.Drawing.Bitmap]::new([int]$width, 2 * (64 * $scale + 120))
+    $small = 16, 20, 24, 28, 32, 40, 48, 64
+    $width = [int](($small | Measure-Object -Sum).Sum * ($scale + 1) + 40 * $small.Count + 256 + 40)
+    $rowH = 64 * $scale + 120
+    $sheet = [System.Drawing.Bitmap]::new($width, 2 * $rowH)
     $g = [System.Drawing.Graphics]::FromImage($sheet)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
     $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    $rows = @(@{ bg = [System.Drawing.Color]::FromArgb(238, 240, 243); fg = [System.Drawing.Color]::FromArgb(255, 26, 26, 26) },
-              @{ bg = [System.Drawing.Color]::FromArgb(28, 28, 28); fg = [System.Drawing.Color]::White })
+    $backgrounds = [System.Drawing.Color]::FromArgb(238, 240, 243), [System.Drawing.Color]::FromArgb(28, 28, 28)
     for ($ri = 0; $ri -lt 2; $ri++) {
-        $top = $ri * (64 * $scale + 120)
-        $g.FillRectangle([System.Drawing.SolidBrush]::new($rows[$ri].bg), 0, $top, $width, 64 * $scale + 120)
+        $top = $ri * $rowH
+        $g.FillRectangle([System.Drawing.SolidBrush]::new($backgrounds[$ri]), 0, $top, $width, $rowH)
         $x = 20
-        foreach ($s in $sizes) {
-            $b = New-Frame $s $rows[$ri].fg
+        foreach ($s in $small) {
+            $b = New-AppFrame $s
             $g.DrawImage($b, $x, $top + 20, $s, $s)
             $g.DrawImage($b, [System.Drawing.Rectangle]::new($x, $top + 100, $s * $scale, $s * $scale))
             $b.Dispose()
             $x += $s * ($scale + 1) + 40
         }
+        $b = New-AppFrame 256
+        $g.DrawImage($b, $x, $top + 100, 256, 256)
+        $b.Dispose()
     }
     $g.Dispose()
     $sheet.Save($Preview, [System.Drawing.Imaging.ImageFormat]::Png)
