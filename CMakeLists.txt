@@ -20,11 +20,14 @@ add_executable(ime2nd WIN32
   src/ImeState.cpp
   src/ImeSwitcher.cpp
   src/PasswordFocus.cpp
+  src/app.rc
   # CMake embeds *.manifest sources via mt.exe (PerMonitorV2 DPI, asInvoker).
   src/app.manifest
 )
 
 target_compile_definitions(ime2nd PRIVATE UNICODE _UNICODE)
+# res/ holds the .ico files that src/app.rc names.
+target_include_directories(ime2nd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/res)
 
 if(MSVC)
   target_compile_options(ime2nd PRIVATE /W4 /utf-8 /EHsc)
