@@ -176,8 +176,19 @@ HWND CreateMainWindow(HINSTANCE inst) {
     wc.hInstance = inst;
     wc.lpszClassName = kWndClass;
     RegisterClassW(&wc);
-    return CreateWindowExW(0, kWndClass, L"ime2nd", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, inst,
-                           nullptr);
+    // A hidden top-level window, not HWND_MESSAGE: message-only windows don't receive broadcasts,
+    // so the TaskbarCreated broadcast (Explorer restart) would never re-add the tray icon.
+    return CreateWindowExW(WS_EX_TOOLWINDOW, kWndClass, L"ime2nd", WS_POPUP, 0, 0, 0, 0, nullptr,
+                           nullptr, inst, nullptr);
+}
+
+// Elevated, the hook would also see keys typed into elevated windows, and the exe usually sits in a
+// user-writable folder (a non-elevated process could swap it). Never run with admin rights.
+bool IsElevated() {
+    TOKEN_ELEVATION e{};
+    DWORD size = 0;
+    return GetTokenInformation(GetCurrentProcessToken(), TokenElevation, &e, sizeof(e), &size) &&
+           e.TokenIsElevated;
 }
 
 // ---- --selftest: exercises each component and reports to the parent console -------------------
@@ -222,6 +233,12 @@ int SelfTest(HINSTANCE inst) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
+    if (IsElevated()) {
+        MessageBoxW(nullptr,
+                    L"ime2nd は管理者として実行できません。\n通常の権限で起動してください。",
+                    L"ime2nd", MB_ICONERROR);
+        return 1;
+    }
     if (cmd && wcsstr(cmd, L"--selftest")) return SelfTest(inst);
 
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\ime2nd.single-instance");
