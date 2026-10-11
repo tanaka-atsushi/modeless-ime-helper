@@ -1,5 +1,5 @@
 @echo off
-rem Builds build\ime2nd.exe with CMake + Ninja + MSVC. Run from any prompt.
+rem Builds build\ModelessImeHelper.exe with CMake + Ninja + MSVC. Run from any prompt.
 rem Usage: build.bat [debug]     (default: release; debug uses build-debug\)
 setlocal
 set "PRESET=release"

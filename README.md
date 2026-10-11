@@ -1,4 +1,4 @@
-# ime2nd
+# Modeless IME Helper
 
 Windows 11 のタスクトレイ常駐アプリ。IME が ON のとき、**未確定の日本語に英字をそのまま混ぜて、まとめて変換**できるようにします。
 
@@ -19,9 +19,9 @@ Windows 11 のタスクトレイ常駐アプリ。IME が ON のとき、**未�
 ## ビルド / 実行
 
 ```
-build.bat            -> build\ime2nd.exe  (CMake + Ninja + MSVC。VS 同梱の cmake を自動で使用)
-build\ime2nd.exe     -> 常駐開始（トレイアイコンの右クリックで 有効/無効・開始キー・自動起動・終了）
-build\ime2nd.exe --selftest   -> IME状態・変換モード・フック遅延と、20 秒間のフォーカス移動・欄の判定（normal / PASSWORD / unknown）を build\selftest.txt に出力
+build.bat            -> build\ModelessImeHelper.exe  (CMake + Ninja + MSVC。VS 同梱の cmake を自動で使用)
+build\ModelessImeHelper.exe     -> 常駐開始（トレイアイコンの右クリックで 有効/無効・開始キー・自動起動・終了）
+build\ModelessImeHelper.exe --selftest   -> IME状態・変換モード・フック遅延と、20 秒間のフォーカス移動・欄の判定（normal / PASSWORD / unknown）を build\selftest.txt に出力
 pwsh -File tools\make-icons.ps1   -> アイコン res\app.ico（exe とトレイ共通）を作り直す（-Preview 画像.png で拡大プレビュー）
 ```
 
@@ -45,7 +45,7 @@ pwsh -File tools\make-icons.ps1   -> アイコン res\app.ico（exe とトレイ
 | 無変換 / 変換 | 29 / 28 |
 | カタカナひらがな | 242 |
 
-選択は `HKCU\Software\ime2nd` の `TriggerShift` に保存され、次回起動時も有効です（それ以外の値が入っていたときは左 Shift になります）。
+選択は `HKCU\Software\ModelessImeHelper` の `TriggerShift` に保存され、次回起動時も有効です（それ以外の値が入っていたときは左 Shift になります）。
 
 どのキーも、**IME が ON の間は横取りする**ので、そのキー本来の働きは IME が ON の間は使えません（IME が OFF なら普通に働きます）。
 

@@ -31,7 +31,7 @@ Windows 11 のタスクトレイ常駐アプリ (C++17 / Win32、管理者権限
 - **ビルド**: `build.bat` (CMake + Ninja + MSVC。VS 2026 Community、VS 同梱の cmake を自動使用)。`build.bat debug` で `build-debug\`。
 - トレイメニュー: 有効 / IME 状態が不明のときも横取り / 英字入力の開始キー / スペース・記号のあとの待ち時間 / 自動起動 / 終了。
 
-## 保存される設定 (`HKCU\Software\ime2nd`, REG_DWORD)
+## 保存される設定 (`HKCU\Software\ModelessImeHelper`, REG_DWORD)
 | 名前 | 値 |
 |---|---|
 | `TriggerShift` | 160 = 左 Shift (既定), 161 = 右 Shift, 29 = 無変換, 28 = 変換, 242 = カタカナひらがな (それ以外の値は左 Shift として扱う) |
@@ -83,8 +83,8 @@ Windows 11 のタスクトレイ常駐アプリ (C++17 / Win32、管理者権限
 
 ## 作業上の注意 (このセッションで学んだこと)
 - **ユーザーのデスクトップを勝手に操作しない。** Excel を前面に出す / スクリーンショットを撮る操作は拒否された。実験でフォーカスを動かす場合は事前に許可を取り、**前面ウィンドウが検証用であることを毎回確認して、違えば何も送らず中止する**こと。ユーザーが別の作業をしている最中はフォーカスを奪わない (`AppActivate` が効かないこともある)。
-- フックは注入入力 (`LLKHF_INJECTED`) を無視するので、**注入ではフックのテストができない**。横取りの動作確認は実キー入力が必要 (ユーザーに依頼する)。トレイメニューの動作は、メイン窓 (非表示のトップレベルウィンドウ、class `ime2nd.Main`。以前はメッセージ専用ウィンドウだったが、それだと `TaskbarCreated` が届かずエクスプローラー再起動後にトレイアイコンが戻らないので変更) に `WM_COMMAND` を `PostMessage` して確認できる (ID: 有効=1, 自動起動=6, 終了=7, 開始キー=200+`kTriggerKeys` の順番 (左 Shift=200, 右 Shift=201, 無変換=202, 変換=203, カタカナひらがな=204))。PowerShell から `FindWindowEx` を呼ぶときは `$null` ではなく `[NullString]::Value` を渡す (`$null` は空文字になる)。
-- ビルド前に実行中の `ime2nd.exe` を終了する (リンクできないため)。ビルド後は起動し直す。引継ぎ時点では PID 20912 が起動中。
+- フックは注入入力 (`LLKHF_INJECTED`) を無視するので、**注入ではフックのテストができない**。横取りの動作確認は実キー入力が必要 (ユーザーに依頼する)。トレイメニューの動作は、メイン窓 (非表示のトップレベルウィンドウ、class `ModelessImeHelper.Main`。以前はメッセージ専用ウィンドウだったが、それだと `TaskbarCreated` が届かずエクスプローラー再起動後にトレイアイコンが戻らないので変更) に `WM_COMMAND` を `PostMessage` して確認できる (ID: 有効=1, 自動起動=6, 終了=7, 開始キー=200+`kTriggerKeys` の順番 (左 Shift=200, 右 Shift=201, 無変換=202, 変換=203, カタカナひらがな=204))。PowerShell から `FindWindowEx` を呼ぶときは `$null` ではなく `[NullString]::Value` を渡す (`$null` は空文字になる)。
+- ビルド前に実行中の `ModelessImeHelper.exe` を終了する (リンクできないため)。ビルド後は起動し直す。引継ぎ時点では PID 20912 が起動中。
 - 日本語環境のメモ帳のタイトルは「… - メモ帳」。Windows 11 のメモ帳はタブ式で、`notepad.exe <ファイル>` は既存ウィンドウに新しいタブを開く (既存タブの内容には触れない)。
 - PowerShell 7 には `Marshal.GetActiveObject` が無い。Excel の COM は Windows PowerShell 5 (`powershell.exe`) で接続する。
 - Bash ツールで C++ ソースをヒアドキュメントで書くと、`L'\\'` のようなバックスラッシュが壊れることがある。ソース内では `0x5C` を使うか、Write / Edit ツールで書く。

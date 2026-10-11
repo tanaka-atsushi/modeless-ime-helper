@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ime2nd LANGUAGES CXX)
+project(ModelessImeHelper LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,7 @@ endif()
 # /MT (static CRT) so the exe has no VC++ redistributable dependency.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-add_executable(ime2nd WIN32
+add_executable(ModelessImeHelper WIN32
   src/main.cpp
   src/KeyboardHook.cpp
   src/ImeState.cpp
@@ -25,14 +25,14 @@ add_executable(ime2nd WIN32
   src/app.manifest
 )
 
-target_compile_definitions(ime2nd PRIVATE UNICODE _UNICODE)
+target_compile_definitions(ModelessImeHelper PRIVATE UNICODE _UNICODE)
 # res/ holds the .ico files that src/app.rc names.
-target_include_directories(ime2nd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/res)
+target_include_directories(ModelessImeHelper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/res)
 
 if(MSVC)
-  target_compile_options(ime2nd PRIVATE /W4 /utf-8 /EHsc)
+  target_compile_options(ModelessImeHelper PRIVATE /W4 /utf-8 /EHsc)
 endif()
 
-target_link_libraries(ime2nd PRIVATE
+target_link_libraries(ModelessImeHelper PRIVATE
   user32 shell32 imm32 advapi32 ole32 oleaut32 uiautomationcore
 )

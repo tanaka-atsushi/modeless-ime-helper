@@ -17,10 +17,10 @@ enum : UINT {
 constexpr UINT kTriggerFirstId = 200;
 constexpr UINT kTriggerCount = sizeof(kTriggerKeys) / sizeof(kTriggerKeys[0]);
 constexpr UINT_PTR kTimerReinstall = 1;
-const wchar_t kWndClass[] = L"ime2nd.Main";
+const wchar_t kWndClass[] = L"ModelessImeHelper.Main";
 const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const wchar_t kRunValue[] = L"ime2nd";
-const wchar_t kSettingsKey[] = L"Software\\ime2nd";
+const wchar_t kRunValue[] = L"ModelessImeHelper";
+const wchar_t kSettingsKey[] = L"Software\\ModelessImeHelper";
 const wchar_t kTriggerValue[] = L"TriggerShift";  // REG_DWORD: the vk of one of kTriggerKeys
 
 HWND g_wnd = nullptr;
@@ -98,7 +98,7 @@ const wchar_t* TriggerName() {
 }
 
 void SetTrayTip() {
-    swprintf_s(g_nid.szTip, L"ime2nd - %s+英字 未確定に英字を混ぜる", TriggerName());
+    swprintf_s(g_nid.szTip, L"Modeless IME Helper - %s+英字 未確定に英字を混ぜる", TriggerName());
 }
 
 // Loads the app icon at the small-icon size for the system DPI into g_nid.hIcon (its blue tile shows
@@ -245,7 +245,7 @@ HWND CreateMainWindow(HINSTANCE inst) {
     RegisterClassW(&wc);
     // A hidden top-level window, not HWND_MESSAGE: message-only windows don't receive broadcasts,
     // so the TaskbarCreated broadcast (Explorer restart) would never re-add the tray icon.
-    return CreateWindowExW(WS_EX_TOOLWINDOW, kWndClass, L"ime2nd", WS_POPUP, 0, 0, 0, 0, nullptr,
+    return CreateWindowExW(WS_EX_TOOLWINDOW, kWndClass, L"Modeless IME Helper", WS_POPUP, 0, 0, 0, 0, nullptr,
                            nullptr, inst, nullptr);
 }
 
@@ -314,13 +314,13 @@ int SelfTest(HINSTANCE inst) {
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
     if (IsElevated()) {
         MessageBoxW(nullptr,
-                    L"ime2nd は管理者として実行できません。\n通常の権限で起動してください。",
-                    L"ime2nd", MB_ICONERROR);
+                    L"Modeless IME Helper は管理者として実行できません。\n通常の権限で起動してください。",
+                    L"Modeless IME Helper", MB_ICONERROR);
         return 1;
     }
     if (cmd && wcsstr(cmd, L"--selftest")) return SelfTest(inst);
 
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\ime2nd.single-instance");
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\ModelessImeHelper.single-instance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
 
     LoadSettings();
@@ -332,7 +332,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
     ImeSwitcher::Start();
     PasswordFocus::Start();
     if (!KeyboardHook::Install()) {
-        MessageBoxW(nullptr, L"キーボードフックの登録に失敗しました。", L"ime2nd", MB_ICONERROR);
+        MessageBoxW(nullptr, L"キーボードフックの登録に失敗しました。", L"Modeless IME Helper", MB_ICONERROR);
         return 1;
     }
     InstallWinEvents();
