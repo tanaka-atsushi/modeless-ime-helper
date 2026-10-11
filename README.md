@@ -7,6 +7,8 @@ Windows 11 のタスクトレイ常駐アプリ。IME が ON のとき、**未�
 - 開始キーを押している間だけ、IME を「半角英数」に切り替えます（IME は閉じないので、未確定の文字はそのまま残ります）。離すとひらがなに戻ります。
 - 開始キーは、IME が ON のときはアプリに渡しません（横取りします）。そのため、押している間に打つ英字は小文字になります。もう一方の Shift も一緒に押すと大文字・Shift 付きの記号になります。
 - 横取りするのは、IME が ON だとはっきり判定できたときだけです。IME の状態を取得できないアプリや、正しく報告しないアプリ（Windows Terminal など）では、開始キーは普通のキーとして働きます。
+- **パスワード欄では横取りしません。** Chrome・Edge・Electron 製アプリ・WPF などは、パスワード欄でもウィンドウの IME が「ON」のままに見えるので、アクセシビリティ（UI Automation）で「今の欄がパスワード欄か」を調べています。欄を移るたびに確認し、確認が済むまで（ふつう数十 ms）と、確認できなかったアプリでは、開始キーは普通のキーとして働きます。
+  - 副作用：UI Automation で問い合わせると、Chromium 系のアプリはアクセシビリティ機能を有効にします。重いページで CPU・メモリの使用量が少し増えることがあります。
 - IME が OFF のときは何もしません（開始キーも普通の Shift・無変換などとして働きます）。
 - **試作版**です。動作を確認したのはメモ帳だけです（下の「既知の制限」）。
 
@@ -19,7 +21,7 @@ Windows 11 のタスクトレイ常駐アプリ。IME が ON のとき、**未�
 ```
 build.bat            -> build\ime2nd.exe  (CMake + Ninja + MSVC。VS 同梱の cmake を自動で使用)
 build\ime2nd.exe     -> 常駐開始（トレイアイコンの右クリックで 有効/無効・開始キー・自動起動・終了）
-build\ime2nd.exe --selftest   -> IME状態・変換モード・フック遅延を確認し build\selftest.txt に出力
+build\ime2nd.exe --selftest   -> IME状態・変換モード・フック遅延と、20 秒間のフォーカス移動・欄の判定（normal / PASSWORD / unknown）を build\selftest.txt に出力
 ```
 
 開始キーを押している間も、Backspace・Esc・Enter・矢印などはそのまま IME / アプリに届きます（Backspace で未確定の1文字削除など、IME の普段の動作になります）。開始キー+Space は、未確定の中に半角スペースとして入ります。
@@ -29,6 +31,7 @@ build\ime2nd.exe --selftest   -> IME状態・変換モード・フック遅延�
 - `KeyboardHook` — `WH_KEYBOARD_LL`。開始キーだけを扱う（IME ON のときに横取り）。重い処理はしない（約300ms超でフックが外されるため）
 - `ImeSwitcher` — 作業スレッド。開始キーを押したら `VK_IME_OFF`、離したら `VK_IME_ON` を注入する
 - `ImeState` — `ImmGetDefaultIMEWnd` + `WM_IME_CONTROL(IMC_GETOPENSTATUS / IMC_GETCONVERSIONMODE)`、ワーカースレッドでキャッシュ
+- `PasswordFocus` — フォーカスが移るたび（`EVENT_OBJECT_FOCUS` と前面ウィンドウの切り替え）に、ワーカースレッドで UI Automation の `IsPassword` を調べてキャッシュ
 
 ## 設定
 

@@ -19,6 +19,7 @@ add_executable(ime2nd WIN32
   src/KeyboardHook.cpp
   src/ImeState.cpp
   src/ImeSwitcher.cpp
+  src/PasswordFocus.cpp
   # CMake embeds *.manifest sources via mt.exe (PerMonitorV2 DPI, asInvoker).
   src/app.manifest
 )
@@ -30,5 +31,5 @@ if(MSVC)
 endif()
 
 target_link_libraries(ime2nd PRIVATE
-  user32 shell32 imm32 advapi32
+  user32 shell32 imm32 advapi32 ole32 oleaut32 uiautomationcore
 )

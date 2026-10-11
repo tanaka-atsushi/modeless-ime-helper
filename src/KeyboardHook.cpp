@@ -1,6 +1,7 @@
 #include "KeyboardHook.h"
 #include "ImeState.h"
 #include "ImeSwitcher.h"
+#include "PasswordFocus.h"
 
 namespace {
 HHOOK g_hook = nullptr;
@@ -10,7 +11,8 @@ HHOOK g_hook = nullptr;
 // Swallowed: pressed while the IME was ON. Its press (and repeats, and release) are eaten, so the
 //   app never sees it: the keys typed meanwhile pass through untouched, as plain unshifted keys, while
 //   ImeSwitcher holds the IME in half-width alphanumeric mode.
-// Passed: pressed while the IME was OFF or undeterminable (or disabled, or with Ctrl/Alt/Win held): an ordinary key
+// Passed: pressed while the IME was OFF or undeterminable, or in a password / not yet checked field
+//   (PasswordFocus) (or disabled, or with Ctrl/Alt/Win held): an ordinary key
 //   until it is released, even if the IME turns ON meanwhile (the app already saw it go down).
 // A swallowed key never reaches the system key-state table (measured with CapsLock:
 // GetAsyncKeyState stays "up"), so the state is tracked from events. A missed release (elevated
@@ -35,8 +37,12 @@ bool CtrlAltOrWinHeld() {
     return Down(VK_CONTROL) || Down(VK_MENU) || Down(VK_LWIN) || Down(VK_RWIN);
 }
 
-// Only a definite ON counts: an undeterminable state (Unknown) passes the trigger through.
-bool ImeIsOn() { return ImeState::Current() == ImeMode::Open; }
+// Only a definite ON counts: an undeterminable state (Unknown) passes the trigger through. So does a
+// password field (or a field not checked yet): there the IME doesn't compose even when the window's
+// IME reads ON (Chromium, WPF, ...), and eating the Shift would silently lose capitals.
+bool ImeIsOn() {
+    return PasswordFocus::Current() == FieldKind::Normal && ImeState::Current() == ImeMode::Open;
+}
 
 // Keys that change the IME mode. The cache is refreshed a little later, after the app has
 // processed the key, so the next trigger press is judged on the new mode.

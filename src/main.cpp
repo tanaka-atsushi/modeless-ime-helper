@@ -4,6 +4,7 @@
 #include "ImeState.h"
 #include "ImeSwitcher.h"
 #include "KeyboardHook.h"
+#include "PasswordFocus.h"
 
 namespace {
 enum : UINT {
@@ -146,9 +147,42 @@ void ShowTrayMenu() {
 
 // ---- main window ------------------------------------------------------------------------------
 
+ULONGLONG g_logStart = 0;  // --selftest: log focus events relative to this tick (0 = off)
+HWINEVENTHOOK g_fgHook = nullptr;
+HWINEVENTHOOK g_focusHook = nullptr;
+
 void CALLBACK OnForeground(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
     ImeState::RequestRefresh();
+    PasswordFocus::FocusChanged();
     KeyboardHook::ResetHeld();  // a trigger release may have gone to a window the hook can't see
+}
+
+// Focus moved inside a window too (e.g. from a page's user-name field to its password field).
+void CALLBACK OnFocus(HWINEVENTHOOK, DWORD, HWND h, LONG, LONG, DWORD, DWORD) {
+    PasswordFocus::FocusChanged();
+    if (g_logStart) {
+        wchar_t cls[64] = L"";
+        GetClassNameW(h, cls, 64);
+        printf("[%6llu ms] focus event (%ls)\n", GetTickCount64() - g_logStart, cls);
+    }
+}
+
+// Out-of-context: the callbacks run on this (the main) thread.
+void InstallWinEvents() {
+    g_fgHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+                               OnForeground, 0, 0, WINEVENT_OUTOFCONTEXT);
+    g_focusHook = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, OnFocus, 0, 0,
+                                  WINEVENT_OUTOFCONTEXT);
+}
+
+void UninstallWinEvents() {
+    if (g_fgHook) UnhookWinEvent(g_fgHook);
+    if (g_focusHook) UnhookWinEvent(g_focusHook);
+    g_fgHook = g_focusHook = nullptr;
+}
+
+const char* FieldName(FieldKind k) {
+    return k == FieldKind::Normal ? "normal" : k == FieldKind::Password ? "PASSWORD" : "unknown";
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -224,18 +258,30 @@ int SelfTest(HINSTANCE inst) {
     printf("Conv mode : %lld (raw IMC_GETCONVERSIONMODE; 9 = hiragana, 0 = half-width alphanumeric)\n",
            static_cast<long long>(ImeState::LastConversionMode()));
 
-    // Hook latency: install the real hook for 10 s; type Shift+letters / anything meanwhile.
+    // Install the real hook for 20 s: type Shift+letters / anything, move between fields meanwhile.
+    // Focus events and the field check (normal / PASSWORD / unknown) are logged with timestamps.
     CreateMainWindow(inst);
     ImeState::Start();
     ImeSwitcher::Start();
+    PasswordFocus::Start();
     KeyboardHook::Install();
+    g_logStart = GetTickCount64();
+    InstallWinEvents();
     MSG msg;
-    printf("Hook      : installed for 10 s - type now (Shift+a..z with IME on, normal typing)\n");
-    for (DWORD end = GetTickCount() + 10000; GetTickCount() < end;) {
+    printf("Hook      : installed for 20 s - type now (Shift+a..z with IME on, normal typing)\n");
+    FieldKind shown = FieldKind::Unknown;
+    for (ULONGLONG end = GetTickCount64() + 20000; GetTickCount64() < end;) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+        if (const FieldKind k = PasswordFocus::Current(); k != shown) {
+            shown = k;
+            printf("[%6llu ms] field: %s\n", GetTickCount64() - g_logStart, FieldName(k));
+        }
         Sleep(5);
     }
+    UninstallWinEvents();
+    g_logStart = 0;
     KeyboardHook::Uninstall();
+    PasswordFocus::Stop();
     ImeSwitcher::Stop();
     ImeState::Stop();
     printf("Hook max callback time: %.1f us (limit before Windows drops the hook: ~300000 us)\n",
@@ -263,12 +309,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
 
     ImeState::Start();
     ImeSwitcher::Start();
+    PasswordFocus::Start();
     if (!KeyboardHook::Install()) {
         MessageBoxW(nullptr, L"キーボードフックの登録に失敗しました。", L"ime2nd", MB_ICONERROR);
         return 1;
     }
-    HWINEVENTHOOK fgHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-                                           nullptr, OnForeground, 0, 0, WINEVENT_OUTOFCONTEXT);
+    InstallWinEvents();
     AddTrayIcon();
     SetTimer(g_wnd, kTimerReinstall, 30000, nullptr);
 
@@ -278,8 +324,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
         DispatchMessageW(&msg);
     }
 
-    if (fgHook) UnhookWinEvent(fgHook);
+    UninstallWinEvents();
     KeyboardHook::Uninstall();
+    PasswordFocus::Stop();
     ImeSwitcher::Stop();  // restores the IME if a session was running
     ImeState::Stop();
     CloseHandle(mutex);
