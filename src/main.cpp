@@ -8,7 +8,6 @@
 namespace {
 enum : UINT {
     ID_ENABLE = 1,
-    ID_UNKNOWN_ON,
     ID_STARTUP = 6,
     ID_EXIT,
 };
@@ -106,8 +105,6 @@ void SetTrigger(int vk) {
 void ShowTrayMenu() {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | (g_settings.enabled ? MF_CHECKED : 0), ID_ENABLE, L"有効");
-    AppendMenuW(m, MF_STRING | (g_settings.unknownAsOn ? MF_CHECKED : 0), ID_UNKNOWN_ON,
-                L"IME状態が不明のときも横取りする");
     HMENU trigger = CreatePopupMenu();  // owned by m: DestroyMenu(m) frees it
     for (UINT i = 0; i < kTriggerCount; ++i) {
         const TriggerKey& t = kTriggerKeys[i];
@@ -154,7 +151,6 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             switch (LOWORD(w)) {
                 case ID_ENABLE: g_settings.enabled = !g_settings.enabled; break;
-                case ID_UNKNOWN_ON: g_settings.unknownAsOn = !g_settings.unknownAsOn; break;
                 case ID_STARTUP: SetStartup(!StartupEnabled()); break;
                 case ID_EXIT: DestroyWindow(h); break;
             }

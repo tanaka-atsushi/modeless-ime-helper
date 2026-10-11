@@ -41,7 +41,6 @@ inline const TriggerKey* FindTriggerKey(int vk) {
 
 struct Settings {
     std::atomic<bool> enabled{true};
-    std::atomic<bool> unknownAsOn{false};  // treat undeterminable IME state as ON
     // Key that starts/holds a capture session: the vk of one of kTriggerKeys (saved in HKCU).
     std::atomic<int> triggerVk{VK_LSHIFT};
 };

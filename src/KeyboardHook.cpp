@@ -10,7 +10,7 @@ HHOOK g_hook = nullptr;
 // Swallowed: pressed while the IME was ON. Its press (and repeats, and release) are eaten, so the
 //   app never sees it: the keys typed meanwhile pass through untouched, as plain unshifted keys, while
 //   ImeSwitcher holds the IME in half-width alphanumeric mode.
-// Passed: pressed while the IME was OFF (or disabled, or with Ctrl/Alt/Win held): an ordinary key
+// Passed: pressed while the IME was OFF or undeterminable (or disabled, or with Ctrl/Alt/Win held): an ordinary key
 //   until it is released, even if the IME turns ON meanwhile (the app already saw it go down).
 // A swallowed key never reaches the system key-state table (measured with CapsLock:
 // GetAsyncKeyState stays "up"), so the state is tracked from events. A missed release (elevated
@@ -35,13 +35,8 @@ bool CtrlAltOrWinHeld() {
     return Down(VK_CONTROL) || Down(VK_MENU) || Down(VK_LWIN) || Down(VK_RWIN);
 }
 
-bool ImeIsOn() {
-    switch (ImeState::Current()) {
-        case ImeMode::Open: return true;
-        case ImeMode::Unknown: return g_settings.unknownAsOn.load();
-        default: return false;
-    }
-}
+// Only a definite ON counts: an undeterminable state (Unknown) passes the trigger through.
+bool ImeIsOn() { return ImeState::Current() == ImeMode::Open; }
 
 // Keys that change the IME mode. The cache is refreshed a little later, after the app has
 // processed the key, so the next trigger press is judged on the new mode.
