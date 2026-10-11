@@ -6,13 +6,14 @@ namespace {
 constexpr WPARAM kImcGetConversionMode = 0x0001;
 constexpr WPARAM kImcSetConversionMode = 0x0002;
 constexpr WPARAM kImcGetOpenStatus = 0x0005;
-constexpr WPARAM kImcSetOpenStatus = 0x0006;
 constexpr DWORD_PTR kCmodeNative = 0x0001;  // IME_CMODE_NATIVE
 constexpr ULONGLONG kFreshMs = 400;
-constexpr DWORD kSwitchWaitMs = 150;  // how long Suspend/Resume wait for the IME to follow
 
 std::atomic<int> g_mode{static_cast<int>(ImeMode::Unknown)};
 std::atomic<ULONGLONG> g_stamp{0};
+std::atomic<LONG_PTR> g_lastConv{-1};  // raw conversion mode from the last query, -1 = unknown
+std::atomic<bool> g_frozen{false};     // our own session switched the IME: keep the cache as it is
+std::atomic<DWORD> g_delayMs{0};       // wait before the next query (lets an IME key take effect)
 HANDLE g_event = nullptr;
 std::atomic<bool> g_quit{false};
 std::thread g_thread;
@@ -20,20 +21,13 @@ std::thread g_thread;
 void Worker() {
     while (WaitForSingleObject(g_event, INFINITE) == WAIT_OBJECT_0) {
         if (g_quit) break;
+        if (DWORD d = g_delayMs.exchange(0)) Sleep(d);
+        if (g_frozen) continue;
         ImeMode m = ImeState::QueryNow(100);
+        if (g_frozen) continue;  // a session started while we were asking
         g_mode = static_cast<int>(m);
         g_stamp = GetTickCount64();
     }
-}
-
-// ImmGetContext does not work across processes; the default IME window is asked instead.
-HWND FindImeWindow() {
-    HWND fg = GetForegroundWindow();
-    if (!fg) return nullptr;
-    DWORD tid = GetWindowThreadProcessId(fg, nullptr);
-    GUITHREADINFO gi{sizeof(gi)};
-    HWND target = (GetGUIThreadInfo(tid, &gi) && gi.hwndFocus) ? gi.hwndFocus : fg;
-    return ImmGetDefaultIMEWnd(target);
 }
 
 bool Control(HWND ime, WPARAM cmd, LPARAM value, DWORD timeoutMs, UINT extraFlags, DWORD_PTR* out) {
@@ -42,15 +36,6 @@ bool Control(HWND ime, WPARAM cmd, LPARAM value, DWORD timeoutMs, UINT extraFlag
                                   timeoutMs, &r) != 0;
     if (out) *out = r;
     return ok;
-}
-
-bool WaitOpenStatus(HWND ime, bool want, DWORD budgetMs) {
-    for (ULONGLONG end = GetTickCount64() + budgetMs;;) {
-        DWORD_PTR open = 0;
-        if (Control(ime, kImcGetOpenStatus, 0, 100, 0, &open) && (open != 0) == want) return true;
-        if (GetTickCount64() >= end) return false;
-        Sleep(5);
-    }
 }
 }  // namespace
 
@@ -71,12 +56,23 @@ void Stop() {
     g_event = nullptr;
 }
 
-void RequestRefresh() {
+void RequestRefresh(DWORD delayMs) {
+    if (delayMs) g_delayMs = delayMs;
     if (g_event) SetEvent(g_event);
 }
 
+// ImmGetContext does not work across processes; the default IME window is asked instead.
+HWND FocusImeWindow() {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return nullptr;
+    DWORD tid = GetWindowThreadProcessId(fg, nullptr);
+    GUITHREADINFO gi{sizeof(gi)};
+    HWND target = (GetGUIThreadInfo(tid, &gi) && gi.hwndFocus) ? gi.hwndFocus : fg;
+    return ImmGetDefaultIMEWnd(target);
+}
+
 ImeMode QueryNow(DWORD timeoutMs) {
-    HWND ime = FindImeWindow();
+    HWND ime = FocusImeWindow();
     if (!ime) return ImeMode::Unknown;
     DWORD_PTR open = 0;
     // SMTO_BLOCK: no re-entry into the hook while waiting.
@@ -85,14 +81,18 @@ ImeMode QueryNow(DWORD timeoutMs) {
     // The Windows 11 Microsoft IME stays "open" in its direct-input (A) mode and only clears
     // IME_CMODE_NATIVE in the conversion mode, so open status alone reports ON when it is off.
     DWORD_PTR conv = 0;
-    if (Control(ime, kImcGetConversionMode, 0, timeoutMs, SMTO_BLOCK, &conv) && !(conv & kCmodeNative))
-        return ImeMode::Closed;
+    if (Control(ime, kImcGetConversionMode, 0, timeoutMs, SMTO_BLOCK, &conv)) {
+        g_lastConv = static_cast<LONG_PTR>(conv);
+        if (!(conv & kCmodeNative)) return ImeMode::Closed;
+    } else {
+        g_lastConv = -1;
+    }
     return ImeMode::Open;
 }
 
 ImeMode Current() {
     ULONGLONG age = GetTickCount64() - g_stamp.load();
-    if (age > kFreshMs) {
+    if (age > kFreshMs && !g_frozen) {
         ImeMode m = QueryNow(30);
         g_mode = static_cast<int>(m);
         g_stamp = GetTickCount64();
@@ -101,34 +101,17 @@ ImeMode Current() {
     return static_cast<ImeMode>(g_mode.load());
 }
 
-bool Suspend(Saved& saved) {
-    saved = {};
-    HWND ime = FindImeWindow();
-    if (!ime) return false;
-    DWORD_PTR open = 0, conv = 0;
-    if (!Control(ime, kImcGetOpenStatus, 0, 100, 0, &open) || !open) return false;
-    bool hasConv = Control(ime, kImcGetConversionMode, 0, 100, 0, &conv);
-    if (hasConv && !(conv & kCmodeNative)) return false;  // already in direct-input mode
-    saved.imeWnd = ime;
-    saved.conv = conv;
-    saved.hasConv = hasConv;
-    saved.valid = true;  // from here on Resume restores even if the close could not be confirmed
-    Control(ime, kImcSetOpenStatus, 0, kSwitchWaitMs, 0, nullptr);
-    WaitOpenStatus(ime, false, kSwitchWaitMs);
-    return true;
-}
+LONG_PTR LastConversionMode() { return g_lastConv.load(); }
 
-void Resume(const Saved& saved) {
-    if (!saved.valid) return;
-    Control(saved.imeWnd, kImcSetOpenStatus, 1, kSwitchWaitMs, 0, nullptr);
-    if (saved.hasConv)
-        Control(saved.imeWnd, kImcSetConversionMode, static_cast<LPARAM>(saved.conv), kSwitchWaitMs, 0,
-                nullptr);
-    WaitOpenStatus(saved.imeWnd, true, kSwitchWaitMs);
-    // Keep the hook's cache from reporting the transient "closed" state, then let the worker verify.
+void Freeze(bool on) { g_frozen = on; }
+
+void MarkOpen() {
     g_mode = static_cast<int>(ImeMode::Open);
     g_stamp = GetTickCount64();
-    RequestRefresh();
+}
+
+bool SetConversionMode(HWND ime, DWORD_PTR conv) {
+    return ime && Control(ime, kImcSetConversionMode, static_cast<LPARAM>(conv), 150, 0, nullptr);
 }
 
 }  // namespace ImeState

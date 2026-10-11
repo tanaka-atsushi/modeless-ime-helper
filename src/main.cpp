@@ -1,12 +1,9 @@
 #include "common.h"
 #include <shellapi.h>
 #include <cstdio>
-#include <memory>
-#include "CaretLocator.h"
 #include "ImeState.h"
+#include "ImeSwitcher.h"
 #include "KeyboardHook.h"
-#include "PopupWindow.h"
-#include "TextInjector.h"
 
 namespace {
 enum : UINT {
@@ -24,16 +21,9 @@ const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t kRunValue[] = L"ime2nd";
 const wchar_t kSettingsKey[] = L"Software\\ime2nd";
 const wchar_t kTriggerValue[] = L"TriggerShift";  // REG_DWORD: VK_LSHIFT, VK_RSHIFT or VK_CAPITAL
-const wchar_t kDelayValue[] = L"BreakDelayMs";    // REG_DWORD: 0..kMaxBreakDelayMs
-
-// Choices in the tray menu for the pause after spaces/punctuation (menu id = kDelayFirstId + index).
-constexpr int kDelayChoices[] = {0, 50, 100, 150, 250, 400};
-constexpr UINT kDelayFirstId = 100;
-constexpr UINT kDelayCount = sizeof(kDelayChoices) / sizeof(kDelayChoices[0]);
 
 HWND g_wnd = nullptr;
 UINT g_taskbarCreated = 0;
-unsigned g_gen = 0;
 NOTIFYICONDATAW g_nid{};
 
 // ---- startup registration (HKCU only: no admin needed) ----------------------------------------
@@ -77,16 +67,9 @@ void SaveDword(const wchar_t* name, DWORD v) {
 
 void LoadSettings() {
     DWORD v = 0;
-    // Missing or invalid values keep the defaults (left Shift, 150 ms).
+    // A missing or invalid value keeps the default (left Shift).
     if (LoadDword(kTriggerValue, v) && (v == VK_LSHIFT || v == VK_RSHIFT || v == VK_CAPITAL))
         g_settings.triggerVk = static_cast<int>(v);
-    if (LoadDword(kDelayValue, v) && v <= static_cast<DWORD>(kMaxBreakDelayMs))
-        g_settings.breakDelayMs = static_cast<int>(v);
-}
-
-void SetBreakDelay(int ms) {
-    g_settings.breakDelayMs = ms;
-    SaveDword(kDelayValue, static_cast<DWORD>(ms));
 }
 
 // ---- tray -------------------------------------------------------------------------------------
@@ -100,7 +83,7 @@ const wchar_t* TriggerName() {
 }
 
 void SetTrayTip() {
-    swprintf_s(g_nid.szTip, L"ime2nd - %s+英字 小窓入力", TriggerName());
+    swprintf_s(g_nid.szTip, L"ime2nd - %s+英字 未確定に英字を混ぜる", TriggerName());
 }
 
 void AddTrayIcon() {
@@ -147,30 +130,13 @@ void ShowTrayMenu() {
     HMENU trigger = CreatePopupMenu();  // owned by m: DestroyMenu(m) frees it
     AppendMenuW(trigger, MF_STRING, ID_TRIGGER_LEFT, L"左 Shift");
     AppendMenuW(trigger, MF_STRING, ID_TRIGGER_RIGHT, L"右 Shift");
-    AppendMenuW(trigger, MF_STRING, ID_TRIGGER_CAPS, L"CapsLock（Caps Lock の切り替えは使えなくなります）");
+    AppendMenuW(trigger, MF_STRING, ID_TRIGGER_CAPS, L"CapsLock（IME が ON の間は Caps Lock の切り替えは使えません）");
     CheckMenuRadioItem(trigger, ID_TRIGGER_LEFT, ID_TRIGGER_CAPS,
                        g_settings.triggerVk == VK_RSHIFT    ? ID_TRIGGER_RIGHT
                        : g_settings.triggerVk == VK_CAPITAL ? ID_TRIGGER_CAPS
                                                             : ID_TRIGGER_LEFT,
                        MF_BYCOMMAND);
     AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(trigger), L"英字入力の開始キー");
-    HMENU delay = CreatePopupMenu();  // owned by m
-    const int current = g_settings.breakDelayMs;
-    int checkedIndex = -1;
-    for (UINT i = 0; i < kDelayCount; ++i) {
-        wchar_t label[48];
-        if (kDelayChoices[i] == 0)
-            wcscpy_s(label, L"待たない (0 ms)");
-        else
-            swprintf_s(label, L"%d ms%s", kDelayChoices[i],
-                       kDelayChoices[i] == kDefaultBreakDelayMs ? L"（標準）" : L"");
-        AppendMenuW(delay, MF_STRING, kDelayFirstId + i, label);
-        if (kDelayChoices[i] == current) checkedIndex = static_cast<int>(i);
-    }
-    if (checkedIndex >= 0)  // a value set by hand in the registry matches no item: none is checked
-        CheckMenuRadioItem(delay, kDelayFirstId, kDelayFirstId + kDelayCount - 1,
-                           kDelayFirstId + checkedIndex, MF_BYCOMMAND);
-    AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(delay), L"スペース・記号のあとの待ち時間");
     AppendMenuW(m, MF_STRING | (StartupEnabled() ? MF_CHECKED : 0), ID_STARTUP,
                 L"Windows起動時に自動実行");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -196,42 +162,10 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     switch (m) {
-        case WM_APP_UPDATE: {
-            const std::wstring& text = KeyboardHook::Buffer();
-            if (text.empty()) {
-                PopupWindow::Hide();
-            } else if (w == 1) {  // new session: show at the mouse until the caret is located
-                POINT pt;
-                GetCursorPos(&pt);
-                RECT anchor{pt.x, pt.y, pt.x + 1, pt.y + 16};
-                PopupWindow::Show(text, anchor);
-                CaretLocator::Request(++g_gen);
-            } else {
-                PopupWindow::SetText(text);
-            }
-            return 0;
-        }
-        case WM_APP_COMMIT: {
-            std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(l));
-            PopupWindow::Hide();
-            TextInjector::Send(*text);
-            return 0;
-        }
-        case WM_APP_CARET: {
-            unsigned gen;
-            RECT rc;
-            if (w == g_gen && CaretLocator::GetResult(gen, rc) && gen == g_gen)
-                PopupWindow::MoveToCaret(rc);
-            return 0;
-        }
         case WM_APP_TRAY:
             if (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_CONTEXTMENU) ShowTrayMenu();
             return 0;
         case WM_COMMAND:
-            if (LOWORD(w) >= kDelayFirstId && LOWORD(w) < kDelayFirstId + kDelayCount) {
-                SetBreakDelay(kDelayChoices[LOWORD(w) - kDelayFirstId]);
-                return 0;
-            }
             switch (LOWORD(w)) {
                 case ID_ENABLE: g_settings.enabled = !g_settings.enabled; break;
                 case ID_UNKNOWN_ON: g_settings.unknownAsOn = !g_settings.unknownAsOn; break;
@@ -284,36 +218,22 @@ int SelfTest(HINSTANCE inst) {
     printf("IME state : %s\n", mode == ImeMode::Open     ? "Open"
                               : mode == ImeMode::Closed ? "Closed"
                                                         : "Unknown");
-    RECT rc{};
-    const wchar_t* how = CaretLocator::LocateNow(rc);
-    if (how)
-        printf("Caret     : %ls  (%ld,%ld)-(%ld,%ld)\n", how, rc.left, rc.top, rc.right, rc.bottom);
-    else
-        printf("Caret     : not found (mouse fallback would be used)\n");
-
-    if (!PopupWindow::Create(inst)) { printf("Popup     : FAILED\n"); return 1; }
-    POINT pt;
-    GetCursorPos(&pt);
-    RECT anchor = how ? rc : RECT{pt.x, pt.y, pt.x + 1, pt.y + 16};
-    PopupWindow::Show(L"selftest", anchor);
-    MSG msg;
-    for (DWORD end = GetTickCount() + 1500; GetTickCount() < end;) {
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
-        Sleep(10);
-    }
-    PopupWindow::Hide();
-    printf("Popup     : shown (check it appeared without stealing focus)\n");
+    printf("Conv mode : %lld (raw IMC_GETCONVERSIONMODE; 9 = hiragana, 0 = half-width alphanumeric)\n",
+           static_cast<long long>(ImeState::LastConversionMode()));
 
     // Hook latency: install the real hook for 10 s; type Shift+letters / anything meanwhile.
-    HWND wnd = CreateMainWindow(inst);
+    CreateMainWindow(inst);
     ImeState::Start();
-    KeyboardHook::Install(wnd);
+    ImeSwitcher::Start();
+    KeyboardHook::Install();
+    MSG msg;
     printf("Hook      : installed for 10 s - type now (Shift+a..z with IME on, normal typing)\n");
     for (DWORD end = GetTickCount() + 10000; GetTickCount() < end;) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
         Sleep(5);
     }
     KeyboardHook::Uninstall();
+    ImeSwitcher::Stop();
     ImeState::Stop();
     printf("Hook max callback time: %.1f us (limit before Windows drops the hook: ~300000 us)\n",
            KeyboardHook::MaxCallbackMicros());
@@ -330,12 +250,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
     LoadSettings();
     g_wnd = CreateMainWindow(inst);
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
-    if (!g_wnd || !PopupWindow::Create(inst)) return 1;
+    if (!g_wnd) return 1;
 
     ImeState::Start();
-    TextInjector::Start();
-    CaretLocator::Start(g_wnd);
-    if (!KeyboardHook::Install(g_wnd)) {
+    ImeSwitcher::Start();
+    if (!KeyboardHook::Install()) {
         MessageBoxW(nullptr, L"キーボードフックの登録に失敗しました。", L"ime2nd", MB_ICONERROR);
         return 1;
     }
@@ -352,10 +271,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int) {
 
     if (fgHook) UnhookWinEvent(fgHook);
     KeyboardHook::Uninstall();
-    TextInjector::Stop();  // finishes queued text so the IME is restored before exit
-    CaretLocator::Stop();
+    ImeSwitcher::Stop();  // restores the IME if a session was running
     ImeState::Stop();
-    PopupWindow::Destroy();
     CloseHandle(mutex);
     return 0;
 }

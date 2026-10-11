@@ -18,9 +18,7 @@ add_executable(ime2nd WIN32
   src/main.cpp
   src/KeyboardHook.cpp
   src/ImeState.cpp
-  src/CaretLocator.cpp
-  src/PopupWindow.cpp
-  src/TextInjector.cpp
+  src/ImeSwitcher.cpp
   # CMake embeds *.manifest sources via mt.exe (PerMonitorV2 DPI, asInvoker).
   src/app.manifest
 )
@@ -32,5 +30,5 @@ if(MSVC)
 endif()
 
 target_link_libraries(ime2nd PRIVATE
-  user32 shell32 imm32 oleacc ole32 oleaut32 uuid shcore advapi32 gdi32
+  user32 shell32 imm32 advapi32
 )

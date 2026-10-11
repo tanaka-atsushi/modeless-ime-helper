@@ -2,15 +2,16 @@
 #include "common.h"
 
 namespace KeyboardHook {
-bool Install(HWND notifyWnd);
+// Only the trigger key is ever eaten: pressed while the IME is ON, it starts a session in which
+// ImeSwitcher holds the IME in half-width alphanumeric mode and every other key passes through.
+bool Install();
 void Uninstall();
-// Re-registers the hook (Windows silently drops slow LL hooks). No-op while a session is active.
+// Re-registers the hook (Windows silently drops slow LL hooks). While a trigger press is tracked it
+// heals a possibly stuck one instead (ends the session) and re-registers on a later tick.
 void Reinstall();
-// Forgets a CapsLock trigger press that may have missed its key-up. Call on foreground change and
-// when the trigger setting changes (same thread as the hook).
+// Ends the session and forgets the tracked trigger press (its release may have gone to a window
+// the hook can't see). Call on foreground change and trigger change (same thread as the hook).
 void ResetHeld();
-// Text accumulated in the current session. Only touch from the thread that installed the hook.
-const std::wstring& Buffer();
 // Worst-case hook callback duration since install, in microseconds.
 double MaxCallbackMicros();
 }  // namespace KeyboardHook
