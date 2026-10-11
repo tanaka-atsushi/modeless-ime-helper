@@ -25,6 +25,22 @@ HWND g_wnd = nullptr;
 UINT g_taskbarCreated = 0;
 NOTIFYICONDATAW g_nid{};
 
+// Full path of this exe ("" on failure). GetModuleFileNameW truncates silently when the buffer is
+// too small (it returns the buffer size), so retry with a larger one.
+std::wstring ExePath() {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD n = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (n == 0) return {};
+        if (n < path.size()) {
+            path.resize(n);
+            return path;
+        }
+        if (path.size() >= 32768) return {};  // longer than any Windows path
+        path.resize(path.size() * 2);
+    }
+}
+
 // ---- startup registration (HKCU only: no admin needed) ----------------------------------------
 
 bool StartupEnabled() {
@@ -33,12 +49,12 @@ bool StartupEnabled() {
 }
 
 void SetStartup(bool on) {
+    const std::wstring path = on ? ExePath() : std::wstring();
+    if (on && path.empty()) return;  // never register a broken path
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
     if (on) {
-        wchar_t path[MAX_PATH];
-        GetModuleFileNameW(nullptr, path, MAX_PATH);
-        std::wstring v = L"\"" + std::wstring(path) + L"\"";
+        std::wstring v = L"\"" + path + L"\"";
         RegSetValueExW(key, kRunValue, 0, REG_SZ, reinterpret_cast<const BYTE*>(v.c_str()),
                        static_cast<DWORD>((v.size() + 1) * sizeof(wchar_t)));
     } else {
@@ -191,12 +207,12 @@ bool IsElevated() {
 
 int SelfTest(HINSTANCE inst) {
     // GUI-subsystem exe has no console: report to selftest.txt next to the exe.
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(nullptr, path, MAX_PATH);
-    wchar_t* slash = wcsrchr(path, L'\\') + 1;
-    wcscpy_s(slash, MAX_PATH - (slash - path), L"selftest.txt");
+    std::wstring path = ExePath();
+    const size_t slash = path.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return 1;
+    path.erase(slash + 1) += L"selftest.txt";
     FILE* f = nullptr;
-    _wfreopen_s(&f, path, L"w", stdout);
+    if (_wfreopen_s(&f, path.c_str(), L"w", stdout) != 0) return 1;
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("[selftest] focus a text field within 3 seconds...\n");
     Sleep(3000);

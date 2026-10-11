@@ -23,7 +23,8 @@ struct Session {
     bool active = false;
     DWORD fgThread = 0;
     HWND imeWnd = nullptr;
-    LONG_PTR conv = -1;  // conversion mode before the session (-1 = unknown)
+    DWORD imeThread = 0;  // owner of imeWnd, to notice a handle reused by another window
+    LONG_PTR conv = -1;   // conversion mode before the session (-1 = unknown)
 };
 
 void TapKey(WORD vk) {
@@ -40,6 +41,14 @@ void TapKey(WORD vk) {
 
 DWORD ForegroundThread() { return GetWindowThreadProcessId(GetForegroundWindow(), nullptr); }
 
+// A session can last long (trigger held, or a missed release healed up to 30 s later). If the
+// original window closed meanwhile, its IME window's handle may now belong to an unrelated window:
+// only send to it if it still exists on the same thread (GetWindowThreadProcessId gives 0 if gone).
+void RestoreConversionMode(const Session& s) {
+    if (s.imeThread && GetWindowThreadProcessId(s.imeWnd, nullptr) == s.imeThread)
+        ImeState::SetConversionMode(s.imeWnd, static_cast<DWORD_PTR>(s.conv));
+}
+
 void Begin(Session& s) {
     if (s.active) return;
     // Our VK_IME_OFF must not be cached as "the user turned the IME off". Set here, not in the
@@ -50,6 +59,7 @@ void Begin(Session& s) {
     s.active = true;
     s.fgThread = ForegroundThread();
     s.imeWnd = ImeState::FocusImeWindow();
+    s.imeThread = s.imeWnd ? GetWindowThreadProcessId(s.imeWnd, nullptr) : 0;
     s.conv = ImeState::LastConversionMode();  // read when the trigger press was judged "IME ON"
     // A session only starts with the IME ON, so a value without NATIVE is stale (e.g. a query that
     // finished after our VK_IME_OFF): restoring it would leave the IME in alphanumeric mode.
@@ -63,11 +73,11 @@ void End(Session& s) {
         TapKey(kVkImeOn);  // ordered after the keys typed in the session
         if (s.conv >= 0 && (static_cast<DWORD_PTR>(s.conv) & ~kCmodeRoman) != kHiragana) {
             Sleep(kFixDelayMs);  // let the app process VK_IME_ON first, or it would override us
-            ImeState::SetConversionMode(s.imeWnd, static_cast<DWORD_PTR>(s.conv));
+            RestoreConversionMode(s);
         }
     } else if (s.conv >= 0) {
         // The keys went elsewhere; put the original window's IME back without touching the new one.
-        ImeState::SetConversionMode(s.imeWnd, static_cast<DWORD_PTR>(s.conv));
+        RestoreConversionMode(s);
     }
     ImeState::Freeze(false);
     ImeState::RequestRefresh();
