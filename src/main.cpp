@@ -9,18 +9,18 @@ namespace {
 enum : UINT {
     ID_ENABLE = 1,
     ID_UNKNOWN_ON,
-    ID_TRIGGER_LEFT,
-    ID_TRIGGER_RIGHT,
-    ID_TRIGGER_CAPS,
-    ID_STARTUP,
+    ID_STARTUP = 6,
     ID_EXIT,
 };
+// Trigger choices in the tray menu: menu id = kTriggerFirstId + index in kTriggerKeys.
+constexpr UINT kTriggerFirstId = 200;
+constexpr UINT kTriggerCount = sizeof(kTriggerKeys) / sizeof(kTriggerKeys[0]);
 constexpr UINT_PTR kTimerReinstall = 1;
 const wchar_t kWndClass[] = L"ime2nd.Main";
 const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t kRunValue[] = L"ime2nd";
 const wchar_t kSettingsKey[] = L"Software\\ime2nd";
-const wchar_t kTriggerValue[] = L"TriggerShift";  // REG_DWORD: VK_LSHIFT, VK_RSHIFT or VK_CAPITAL
+const wchar_t kTriggerValue[] = L"TriggerShift";  // REG_DWORD: the vk of one of kTriggerKeys
 
 HWND g_wnd = nullptr;
 UINT g_taskbarCreated = 0;
@@ -68,18 +68,15 @@ void SaveDword(const wchar_t* name, DWORD v) {
 void LoadSettings() {
     DWORD v = 0;
     // A missing or invalid value keeps the default (left Shift).
-    if (LoadDword(kTriggerValue, v) && (v == VK_LSHIFT || v == VK_RSHIFT || v == VK_CAPITAL))
+    if (LoadDword(kTriggerValue, v) && FindTriggerKey(static_cast<int>(v)))
         g_settings.triggerVk = static_cast<int>(v);
 }
 
 // ---- tray -------------------------------------------------------------------------------------
 
 const wchar_t* TriggerName() {
-    switch (g_settings.triggerVk) {
-        case VK_RSHIFT: return L"右Shift";
-        case VK_CAPITAL: return L"CapsLock";
-        default: return L"左Shift";
-    }
+    const TriggerKey* t = FindTriggerKey(g_settings.triggerVk);
+    return t ? t->name : L"?";
 }
 
 void SetTrayTip() {
@@ -97,26 +94,10 @@ void AddTrayIcon() {
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 }
 
-// A CapsLock trigger is swallowed from now on, so Caps Lock could never be switched off again
-// while it is ON. Taps the key once to switch it off (the injected tap is ignored by our hook).
-// GetKeyState works from any thread; the low bit of GetAsyncKeyState does not mean "on".
-void TurnOffCapsLockState() {
-    if (!(GetKeyState(VK_CAPITAL) & 1)) return;
-    INPUT in[2] = {};
-    for (INPUT& i : in) {
-        i.type = INPUT_KEYBOARD;
-        i.ki.wVk = VK_CAPITAL;
-        i.ki.wScan = static_cast<WORD>(MapVirtualKeyW(VK_CAPITAL, MAPVK_VK_TO_VSC));
-        i.ki.dwExtraInfo = kInjectTag;
-    }
-    in[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(2, in, sizeof(INPUT));
-}
-
 void SetTrigger(int vk) {
     if (g_settings.triggerVk == vk) return;
     g_settings.triggerVk = vk;
-    KeyboardHook::ResetHeld();  // forget a CapsLock press tracked under the previous setting
+    KeyboardHook::ResetHeld();  // forget a press tracked under the previous setting
     SaveDword(kTriggerValue, static_cast<DWORD>(vk));
     SetTrayTip();
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
@@ -128,14 +109,15 @@ void ShowTrayMenu() {
     AppendMenuW(m, MF_STRING | (g_settings.unknownAsOn ? MF_CHECKED : 0), ID_UNKNOWN_ON,
                 L"IME状態が不明のときも横取りする");
     HMENU trigger = CreatePopupMenu();  // owned by m: DestroyMenu(m) frees it
-    AppendMenuW(trigger, MF_STRING, ID_TRIGGER_LEFT, L"左 Shift");
-    AppendMenuW(trigger, MF_STRING, ID_TRIGGER_RIGHT, L"右 Shift");
-    AppendMenuW(trigger, MF_STRING, ID_TRIGGER_CAPS, L"CapsLock（IME が ON の間は Caps Lock の切り替えは使えません）");
-    CheckMenuRadioItem(trigger, ID_TRIGGER_LEFT, ID_TRIGGER_CAPS,
-                       g_settings.triggerVk == VK_RSHIFT    ? ID_TRIGGER_RIGHT
-                       : g_settings.triggerVk == VK_CAPITAL ? ID_TRIGGER_CAPS
-                                                            : ID_TRIGGER_LEFT,
-                       MF_BYCOMMAND);
+    for (UINT i = 0; i < kTriggerCount; ++i) {
+        const TriggerKey& t = kTriggerKeys[i];
+        if (t.vk == VK_NONCONVERT) AppendMenuW(trigger, MF_SEPARATOR, 0, nullptr);  // JIS IME keys
+        std::wstring label = std::wstring(t.name) + t.note;
+        AppendMenuW(trigger, MF_STRING, kTriggerFirstId + i, label.c_str());
+        if (t.vk == g_settings.triggerVk)
+            CheckMenuRadioItem(trigger, kTriggerFirstId, kTriggerFirstId + kTriggerCount - 1,
+                               kTriggerFirstId + i, MF_BYCOMMAND);
+    }
     AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(trigger), L"英字入力の開始キー");
     AppendMenuW(m, MF_STRING | (StartupEnabled() ? MF_CHECKED : 0), ID_STARTUP,
                 L"Windows起動時に自動実行");
@@ -153,7 +135,7 @@ void ShowTrayMenu() {
 
 void CALLBACK OnForeground(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
     ImeState::RequestRefresh();
-    KeyboardHook::ResetHeld();  // a CapsLock release may have gone to a window the hook can't see
+    KeyboardHook::ResetHeld();  // a trigger release may have gone to a window the hook can't see
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -166,15 +148,13 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_CONTEXTMENU) ShowTrayMenu();
             return 0;
         case WM_COMMAND:
+            if (LOWORD(w) >= kTriggerFirstId && LOWORD(w) < kTriggerFirstId + kTriggerCount) {
+                SetTrigger(kTriggerKeys[LOWORD(w) - kTriggerFirstId].vk);
+                return 0;
+            }
             switch (LOWORD(w)) {
                 case ID_ENABLE: g_settings.enabled = !g_settings.enabled; break;
                 case ID_UNKNOWN_ON: g_settings.unknownAsOn = !g_settings.unknownAsOn; break;
-                case ID_TRIGGER_LEFT: SetTrigger(VK_LSHIFT); break;
-                case ID_TRIGGER_RIGHT: SetTrigger(VK_RSHIFT); break;
-                case ID_TRIGGER_CAPS:
-                    SetTrigger(VK_CAPITAL);
-                    TurnOffCapsLockState();  // also when it was already selected and Caps Lock got ON
-                    break;
                 case ID_STARTUP: SetStartup(!StartupEnabled()); break;
                 case ID_EXIT: DestroyWindow(h); break;
             }

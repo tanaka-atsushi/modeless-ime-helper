@@ -5,7 +5,8 @@
 namespace {
 HHOOK g_hook = nullptr;
 
-// State of the trigger key (left Shift, right Shift or CapsLock: a user setting).
+// State of the trigger key (one of kTriggerKeys: left/right Shift, 無変換, 変換 or カタカナひらがな;
+// a user setting).
 // Swallowed: pressed while the IME was ON. Its press (and repeats, and release) are eaten, so the
 //   app never sees it: the keys typed meanwhile pass through untouched, as plain unshifted keys, while
 //   ImeSwitcher holds the IME in half-width alphanumeric mode.
@@ -22,6 +23,14 @@ double g_maxMicros = 0;
 
 bool Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 int TriggerVk() { return g_settings.triggerVk.load(); }
+bool IsTrigger(const KBDLLHOOKSTRUCT* k) {
+    const int vk = TriggerVk();
+    if (k->vkCode == static_cast<DWORD>(vk)) return true;
+    // JIS カタカナひらがな etc.: the vk can change with modifiers (Shift gives VK_DBE_KATAKANA),
+    // the scan code does not.
+    const TriggerKey* t = FindTriggerKey(vk);
+    return t && t->scan && k->scanCode == t->scan && !(k->flags & LLKHF_EXTENDED);
+}
 bool CtrlAltOrWinHeld() {
     return Down(VK_CONTROL) || Down(VK_MENU) || Down(VK_LWIN) || Down(VK_RWIN);
 }
@@ -52,7 +61,7 @@ LRESULT Handle(WPARAM w, LPARAM l, bool& swallow) {
     const bool down = (w == WM_KEYDOWN || w == WM_SYSKEYDOWN);
     const DWORD vk = k->vkCode;
 
-    if (vk != static_cast<DWORD>(TriggerVk())) {
+    if (!IsTrigger(k)) {
         // Every other key passes through untouched (the trigger is the only key we ever eat).
         if (down && IsImeModeKey(vk)) ImeState::RequestRefresh(80);
         return 0;
