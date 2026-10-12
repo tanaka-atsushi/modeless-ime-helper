@@ -23,7 +23,17 @@ build.bat            -> build\ModelessImeHelper.exe  (CMake + Ninja + MSVC。VS 
 build\ModelessImeHelper.exe     -> 常駐開始（トレイアイコンの右クリックで 有効/無効・開始キー・自動起動・終了）
 build\ModelessImeHelper.exe --selftest   -> IME状態・変換モード・フック遅延と、20 秒間のフォーカス移動・欄の判定（normal / PASSWORD / unknown）を build\selftest.txt に出力
 pwsh -File tools\make-icons.ps1   -> アイコン res\app.ico（exe とトレイ共通）を作り直す（-Preview 画像.png で拡大プレビュー）
+installer.bat [バージョン]   -> ビルドしてから build\installer\ModelessImeHelper-Setup-<バージョン>.exe を作る（Inno Setup 6 / 7 が必要。バージョンの初期値は 0.1.0）
 ```
+
+## インストーラ
+
+`installer.bat` で作るセットアップは、ユーザー単位でインストールします（管理者権限は不要。インストール先は `%LOCALAPPDATA%\Programs\Modeless IME Helper`）。アプリと同じく、管理者として実行するとエラーを表示して終了します。
+
+- スタートメニューにショートカットを作ります。「Windows 起動時に自動実行する」を選ぶと、トレイメニューの「Windows起動時に自動実行」と同じ設定（`HKCU\...\Run` の `ModelessImeHelper`）を書き込みます。
+- 起動中の Modeless IME Helper は、上書きインストールとアンインストールの前に自動で終了します。
+- アンインストールすると、このインストール先を指す自動実行の設定と、`HKCU\Software\ModelessImeHelper`（開始キーの設定）も削除します。
+- コード署名はしていないので、初回は SmartScreen の警告が出ることがあります。
 
 開始キーを押している間も、Backspace・Esc・Enter・矢印などはそのまま IME / アプリに届きます（Backspace で未確定の1文字削除など、IME の普段の動作になります）。開始キー+Space は、未確定の中に半角スペースとして入ります。
 
